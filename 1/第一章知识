@@ -1,3 +1,9 @@
+//本章使用到的函数
+getpid()得到进程的pid
+getuid()得到当前登录的用户的所属的用户ID
+getgid()得到当前登录的用户的所属的组ID
+
+
 1.6程序和进程
 	1.程序
 程序是一个存储在磁盘上某个目录中的可执行文件，内核使用exec函数(7个exec函数之一），将程序读入内存，并执行程序。
@@ -137,4 +143,128 @@ int main(int argc,char *argv[])
 输出是:
 EACCES: Permission denied
 ./test_for_error_control.out: No such file or directory
+这所以第二个出现这个输出，是因为我的perror首先打印的是argv[0]的内容，这个时候argv[0]表示的是我运行程序的时候执行的可执行文件的名字
+然后perror接着会输出:然后空格，接着输出errno的值对应的错误信息。
 
+1.8用户标识
+
+1.用户ID
+	口令文件登录项中的用户ID(user ID)是一个数值，它向系统标识各个不同的用户。系统管理员在确定一个用户的登录名的同时，
+确定其用户ID。用户不能更改其用户ID。通常每个用户有一个唯一的用户ID。下面将介绍内核如何使用用户ID来检验该用户是否有执行
+某些操作的权限。
+	用户ID为0的用户为根用户（root）或超级用户。
+
+2.用户组ID
+	口令文件登录项也包括用户的组ID(group ID)，它是一个数值。组ID也是由系统管理员在指定用户登录名时分配的。一般来说，
+在口令文件中有多个登录项具有相同的组ID。组被用于将若干用户集合到项目或部门中去。这种机制允许同组的各个成员之间共享资源
+（如文件）。
+	组文件将组名映射为数值的组ID。组文件通常是/etc/group
+
+为什么会有组名和组ID呢？为什么不直接使用组ID?
+	使用数值的用户ID和数值的组ID设置权限是历史上形成的。对于磁盘上的每个文件，文件系统都存储该文件所有者的用户ID和组
+ID。存储这两个值只需要4个字节（假定每个都以两个字节的整型值存放）。如果使用完整的ASCII登录名和组名，则需要更多的磁盘
+空间。另外在检验权限期间，比较字符串较之比较整型数更消耗时间。
+	但是对于用户而言，使用名字比使用数值更方便。所以口令文件(/etc/passwd)包含了登录名和用户ID之间的映射关系，而组
+文件(/etc/group)包含了组名和组ID之间的映射关系。例如，ls -l命令使用口令文件将数值的用户ID映射为登录名，从而打印
+出文件所有者的登录名。
+早期的UNIX使用16位整型表示用户ID和组ID；现在使用32位
+
+
+#include <stdio.h>
+#include <unpv13e/apue.h>
+#include <unpv13e/apueerror.h>
+
+int main()
+{
+    printf("uid = %d, gid = %d\n",getuid(),getgid());
+    return 0;
+}
+输出:
+uid = 1000, gid = 1000
+
+3.附属组ID
+	除了在口令文件中对一个登录名指定一个组ID外，大多数UNIX系统版本还允许一个用户属于另外一些组。这一功能是从4.2BSD
+开始的，它允许一个用户属于多至16个其他的组。登录时，读文件/etc/group，寻找列由该用户作为其他成员的前16个记录项就可以
+得到该用户的附属组ID。
+
+1.9信号
+	信号(signal)用于通知进程发生了某种情况。例如，若某一进程执行除法操作，其除数为0，则将名为SIGFPE(浮点异常)的信号
+发送给该进程。进程有以下3种方式处理信号的方式:
+		(1)忽略信号，有些信号表示硬件异常，例如，除以0或访问进程地址空间以外的存储单元等，因为这些情况异常产生的后果不
+确定，所以不推荐使用这种处理方式。
+		(2)按系统默认方式处理。对于除数为0，系统默认方式是终止该进程
+		(3)提供一个函数，信号发生时调用该函数，这被称为捕捉该信号。通过提供自编的函数，我们就能知道什么时候产生了信号，
+并按期望的方式处理它。
+很多情况都会产生信号。终端键盘上有两种产生信号的方式，分别称为中断键（interupt key,通常是Delete键或Ctrl+C)和退出
+键(quit key,通常是Ctrl+\)，它们被用于终端当前运行的进程。
+另外一种产生信号的方式是调用kill函数，在一个进程中调用此函数就可向另一个进程发送一个信号。当然这样做也是有些限制的：当
+向一个进程发送信号时，我们必须是那个进程的所有者或者是超级用户。
+之所以Ctrl+C可以终止进程，是因为对于此信号(SIGINT)的系统默认动作是终止进程。该进程没有告诉系统内核应该如何处理此信号，
+所以系统按默认方式终止该进程。
+#include <stdio.h>
+#include <unpv13e/apue.h>
+#include <unpv13e/apueerror.h>
+#include <sys/wait.h>
+
+static void sig_int(int);//自己定义的信号处理的部分
+
+
+int main(void)
+{
+    char   buf[MAXLINE];
+    pid_t  pid;
+    int    status;
+    if(signal(SIGINT,sig_int) == SIG_ERR)
+        err_sys("signal error");
+    printf("%% ");
+    while(fgets(buf,MAXLINE,stdin) != NULL){
+        if(buf[strlen(buf)-1] == '\n')
+            buf[strlen(buf)-1] = 0;//replace newline with NULL其实也就是'\0'
+        if((pid = fork()) <0 )
+            err_sys("fork error");
+        else if(pid == 0){//fork被执行一次，返回两个结果；返回子进程的pid给父进程；返回pid=0给子进程
+            execlp(buf,buf,(char *)0);
+            err_ret("couldn't execute: %s",buf);
+            exit(127);
+        }
+        if((pid = waitpid(pid,&status,0)) < 0){
+            err_sys("waitpid error");
+        }
+        printf("%%");
+    }
+    return 0;
+}
+
+void sig_int(int signo){
+    printf("interupt\n%%");
+}
+extern __sighandler_t signal (int __sig, __sighandler_t __handler)
+    __THROW;
+/* Set the handler for the signal SIG to HANDLER, returning the old
+   handler, or SIG_ERR on error.
+   By default `signal' has the BSD semantic.  */
+这个函数的作用是将SIGINT(也就是中断的信号(Ctrl+C产生的信号))绑定到sig_int这个函数中，其实就是说我通过signal
+这个函数建立了一个绑定的关系：这个关系是当我的SIGINT(Ctrl+C产生的信号)发生的时候，我使用sig_int去处理这个信号。
+返回结果:
+	失败的话：返回SIG_ERR
+	成功的话:返回old handler
+	
+
+1.10时间值
+历史上,UNIX系统使用过两种不同环境的时间值。
+(1):日历时间。该值是自协调世界时(Coordinated Universal Time,UTC)1970年1月1日00:00:00这个特定时间以来
+所经历的秒数累计值。这些时间用可用于记录文件最近一次的修改时间。
+	系统基本数据类型time_t用于保存这种时间值。
+(2):进程时间。也被称为CPU时间，用以度量进程使用的中央处理器资源。进程间以时钟滴答计算。每秒钟曾经取为50、60或
+100个时钟滴答。
+	系统基本数据类型clock_t保存这种时间值。
+	
+当度量一个进程的执行时间时，UNIX系统为一个进程维护了三个进程时间值:
+			....时钟时间
+			....用户CPU时间
+			....系统CPU时间
+时钟时间又称为墙上时间，它是进程运行的时间总量，其值与系统中同时运行的进程数有关。每当在本书中提到时钟时间时，都
+是在系统中没有其他任何活动时进行度量的。
+	用户CPU时间是执行用户指令所用的时间量。系统CPU时间是为该进程执行内核程序所经历的时间。例如，每当一个进程执
+行一个系统服务时，如read或write，在内核执行该服务所花费的时间就计入该进程的系统CPU时间。用户CPU时间和系统CPU
+时间之和常被称为CPU时间。
