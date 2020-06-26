@@ -1,0 +1,140 @@
+1.6程序和进程
+	1.程序
+程序是一个存储在磁盘上某个目录中的可执行文件，内核使用exec函数(7个exec函数之一），将程序读入内存，并执行程序。
+	2.进程和进程ID
+程序的执行实例被称为进程(process)。本书的每一页几乎都会使用这一术语。某些操作系统用任务(task)表示正在被执行的程序。
+UNIX系统确保每个进程都有一个唯一的数字标识符，称为进程ID(procee ID也就是平时常说的pid)，进程ID总是一个非负数。
+
+#include <stdio.h>
+#include <unpv13e/apue.h>
+#include <unpv13e/apueerror.h>
+
+
+int main()
+{
+    printf("hello world from process ID %ld\n",(long)getpid());
+    while(1);
+    return 0;
+}
+ps aux | less//首先ps aux所有正在运行的进程，然后使用less按照进程号进行从小到大排列这些进程
+zailush+ 10400  102  0.0   4356   656 pts/20   R+   10:04   0:38 ./test_for_get_ID.out
+
+	3.进程控制
+有3个用于进程控制的主要函数：fork、exec和waitpid(exec函数有7种变体，但经常把它们统称为exec函数。）
+
+#include <stdio.h>
+#include <unpv13e/apue.h>
+#include <sys/wait.h>
+#include <unpv13e/apueerror.h>
+
+int main()
+{
+    char    buf[MAXLINE];
+    pid_t   pid;
+    int     status;
+
+    printf("%% ");//使用%%去打印%
+    while(fgets(buf,MAXLINE,stdin) != NULL){//读取一行，如果没有遇到结束符的话
+        if(buf[strlen(buf) - 1] == '\n')//如果读取到了换行符，那么我们就把换行符\n转换成0也就是NULL
+            buf[strlen(buf) - 1] = 0;
+        if((pid = fork()) < 0){
+            err_sys("fork error");
+        }else if(pid == 0){
+            execlp(buf,buf,(char *)0);
+            err_ret("couldn't execute : %s",buf);
+            exit(127);
+        }
+        if((pid = waitpid(pid,&status,0)) < 0)
+            err_sys("waitpid error");
+        printf("%%");
+    }
+    return 0;
+}
+
+1.char *fgets(char *str, int n, FILE *stream);
+//fgets函数功能为从指定的流中读取数据，每次读取一行。其原型为：char *fgets(char *str, int n, FILE *stream);从指定的流 stream 
+//读取一行，并把它存储在 str 所指向的字符串内。当读取 (n-1) 个字符时，或者读取到换行符时，或者到达文件末尾时，它会停止，具体视情况而定
+返回值:
+如果成功，该函数返回相同的 str 参数。如果到达文件末尾或者没有读取到任何字符，str 的内容保持不变，并返回一个空指针。如果发生错误，返回一个空指针。
+
+(1)	用标准I/O函数fgets从标准输入一次读取一行。当键入文件结束符（通常是Ctrl+D)作为行的第一个字符时，fgets返回一个null指针，
+于是循环停止，进程也就终止。
+(2)	因为fgets返回的每一行都以换行符终止，后随一个null字节，因为用标准C函数strlen计算次字符串的长度，然后用一个null字节替换换行符
+，这样做的是因为execlp函数要求的参数是以null结束而不是以换行符结束的!!!!
+(3)调用fork()创建一个新进程!!!。新进程是是!!调用进程!!的一个!!副本!!我们称调用进程为父进程，新创建的进程为子进程。fork对父进程
+返回新的子进程的ID(一个非负整数）对子进程则返回0。因为fork创建一个新进程，所以说它被调用一次（由父进程），但返回两次（分别在父进程
+中和在子进程中）。
+(4)在子进程中，调用execlp以执行从标准输入读入的命令。这就用新的程序文件替换了子进程原先执行的程序文件。fork和跟随其后的exec两者的组合就是
+某些操作系统所称的产生(spawn)一个新进程。在UNIX系统中，这两部分分离成两个独立的函数。
+(5)子进程调用execlp执行新程序文件，而父进程希望等待子进程终止，这是通过调用waitpid实现的。其参数指定要等待的进程（即pid参数是子进程ID)。waitpid函数返回子进程终止状态(status变量)。在我们这个简单的程序中，没有使用该信息。如果需要，可以用此值准确地判定子进程是如何终止的。
+(6)该程序最主要限制是不能向所执行的命令传递参数。例如不能指定要列出目录项的目录名，只能对工作目录执行ls命令。为了传递参数，先要分析输入行，然后用某种参数分开（可能使用空格或制表符），再将各个参数传递给execlp函数。
+
+头文件:#include <sys/wait.h>
+pid_t wait(int *status); 
+pid_t waitpid(pid_t pid, int *status, int options); 
+int waitid(idtype_t idtype, id_t id, siginfo_t *infop, int options);
+
+说明:waitpid会暂时停止目前进程的执行，直到有信号来到或子进程结束。
+如果在调用waitpid()时子进程已经结束，则waitpid()会立即返回子进程结束状态值。子进程的结束状态值会由参数status返回，而子进程的进程识别码也会一起返回。如果不在意结束状态值，则参数status可以设成NULL。参数pid为欲等待的子进程识别码。
+其他数值意义如下:
+pid < -1 等待进程组识别码为pid绝对值的任何子进程。
+pid = -1 等待任何子进程，相当于wait()
+pid = 0  等待进程组识别码与目前进程相同的任何子进程。
+pid > 0  等待任何子进程识别码为pid的子进程
+参数options提供了一些额外的选项来控制waitpid，参数option可以为0或可以用"|"运算符把它们连接起来，比如:
+		ret = waitpid(-1,NULL,WNOHANG | WUNTRACED);
+如果我们不想使用它们，也可以把options设为0,如:
+		ret = waitpid(-1,NULL,0);
+WNOHANG 若pid指定的子进程没有结束，则waitpid()函数返回0，不予以等待；若结束，则返回该子进程的ID
+WUNTRACED 若子进程进入暂停状态，则马上返回，但子进程的结束状态不予以理会。WIFSTOPPED(status)宏确定返回值是否对应与一个暂停的子进程。
+
+子进程结束状态返回存于status，底下有几个宏可判别结束情况:
+WIFEXITED(status)如果若为正常结束子进程返回的状态，则为真；对于这种情况可执行WEXITSTATUS(status)，取子进程传给exit或_eixt的低8位。
+WEXITSTATUS(status)取得子进程 exit()返回的结束代码,一般会先用 WIFEXITED 来判断是否正常结束才能使用此宏。
+WIFSIGNALED(status)若为异常结束子进程返回的状态，则为真；对于这种情况可执行WTERMSIG(status)，取使子进程结束的信号编号。
+WTERMSIG(status) 取得子进程因信号而中止的信号代码,一般会先用 WIFSIGNALED 来判断后才使用此宏。
+WIFSTOPPED(status) 若为当前暂停子进程返回的状态，则为真；对于这种情况可执行WSTOPSIG(status)，取使子进程暂停的信号编号。
+WSTOPSIG(status) 取得引发子进程暂停的信号代码,一般会先用 WIFSTOPPED 来判断后才使用此宏。
+如果执行成功则返回子进程识别码(PID) ,如果有错误发生则返回
+返回值-1。失败原因存于 errno 中。
+
+3.int execlp(const char * file,const char * arg,....);
+函数说明：
+execlp()会从PATH 环境变量所指的目录中查找符合参数file的文件名，找到后便执行该文件，然后将第二个以后的参数当做该文件的argv[0]、argv[1]……，最后一个参数必须用空指针(NULL)作结束。如果用常数0来表示一个空指针，则必须将它强制转换为一个字符指针，否则它将解释为整形参数，如果一个整形数的长度与char * 的长度不同，那么exec函数的实际参数就将出错。如果函数调用成功,进程自己的执行代码就会变成加载程序的代码,execlp()后边的代码也就不会执行了.
+返回值：
+如果执行成功则函数不会返回，执行失败则直接返回-1，失败原因存于errno 中。
+
+	4.线程和线程ID
+通常一个进程只有一个控制线程(thread)----某一时刻执行的一组机器指令。对于某些问题，如果有多个控制线程分别作用它的不同部分，那么解决起来就
+容易很多。另外，多个控制线程也可以充分利用多处理器系统的并行能力。
+	一个进程内的所有线程共享同一地址空间、文件描述符、栈以及与进程相关的属性。因为它们能访问同一存储区，所以各线程在访问共享数据时需要采取同步措施以避免不一致性。与进程相同，线程也用ID标识。但是，线程ID只在它所属的进程内起作用。一个进程中的线程ID在另一个进程中没有意义。当在一进程中对某特定的线程进行处理时，我们可以使用该线程的ID引用它。
+
+1.7错误管理
+	C标准中定义了两个函数用于打印出错信息:
+#include <string.h>
+char *strerror(int errnum);
+strerror函数将errnum(通常就是errno值）映射为一个出错消息字符串，并且返回此字符串的指针。
+
+#include <stdio.h>
+void perror(const char *msg);
+它首先输出由msg指针指向的字符串，然后是一个冒号，一个空格，接着是对应于errno值的出错消息，最后是一个换行。
+
+
+#include <stdio.h>
+#include <error.h>
+#include <unpv13e/apue.h>
+#include <unpv13e/apueerror.h>
+
+
+int main(int argc,char *argv[])
+{
+    fprintf(stderr,"EACCES: %s\n",strerror(EACCES));
+    errno = ENOENT;
+    perror(argv[0]);
+    return 0;
+}
+
+输出是:
+EACCES: Permission denied
+./test_for_error_control.out: No such file or directory
+
