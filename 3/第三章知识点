@@ -1,0 +1,118 @@
+3.6函数lseek
+#include <sys/types.h>
+#include <unistd.h>
+
+off_t lseek(int fd, off_t offset, int whence);
+//参考自linux系统调用的网站:
+//https://man7.org/linux/man-pages/dir_all_alphabetic.html
+DESCRIPTION
+       lseek() repositions the file offset of the open file description
+       associated with the file descriptor fd to the argument offset
+       according to the directive whence as follows:
+
+       SEEK_SET
+              The file offset is set to offset bytes.
+
+       SEEK_CUR
+              The file offset is set to its current location plus offset
+              bytes.
+
+       SEEK_END
+              The file offset is set to the size of the file plus offset
+              bytes.
+
+这个offset是跟着whence解释的:
+(1)	当whence是SEEK_SET，文件的偏移量被设置成offset
+(2)	当whence是SEEK_CUR，文件的偏移量被设置成当前的位置加上这个offset
+(3)	当whence是SEEK_END，文件的偏移量被设置成文件的长度加上offset
+
+如果lseek成功执行，则返回新的文件的偏移量，为此可以用下列方式确定打开文件的当前偏移量，
+off_t currpos;
+currpos = lseek(fd,0,SEEK_CUR);
+
+这种方法也可以用来确定所涉及的文件是否可以设置偏移量。如果文件描述符指向的是一个管道、FIFO或网络套接字，
+则lseek返回-1，并将errno设置为ESPIPE。
+
+下面这个程序用来测试对其标准输入能否设置偏移量。
+
+#include <iostream>
+#include "unpv13e/apue.h"
+
+
+int main()
+{
+    if(lseek(STDIN_FILENO,0,SEEK_CUR) == -1)
+        std::cout<<"cannot seek\n";
+    else
+        std::cout<<"seek OK\n";
+    return 0;
+}
+
+$./test_for_lseek.out < /etc/passwd
+seek OK
+$cat < /etc/passwd | ./test_for_lseek.out 
+cannot seek
+
+
+2.write
+
+#include <unistd.h>
+
+    ssize_t write(int fd, const void *buf, size_t count);
+
+
+返回:
+On success, the number of bytes written is returned.  On error, -1 is
+returned, and errno is set to indicate the cause of the error.
+
+
+#include <iostream>
+#include "unpv13e/apue.h"
+#include "unpv13e/apueerror.h"
+#include <fcntl.h>
+
+char buf1[] = "abcdefghij";
+char buf2[] = "ABCDEFGHIJ";
+
+//typedef 数据类型  数据别名
+int main()
+{
+    int fd;//用来保存文件描述符
+
+    if((fd = creat("file.hole",FILE_MODE)) < 0)//FILE_MODE 这里定义成默认普通用户，具有读写权限
+        //组用户和其他用户只有读权限
+        err_sys("create error");
+    
+    if(write(fd,buf1,10) != 10)
+        err_sys("buf1 write error");
+
+    if(lseek(fd,16384,SEEK_SET) == -1)
+        err_sys("lseek error");
+
+    if(write(fd,buf2,10) != 10)
+        err_sys("buf2 write error");
+
+    return 0;
+}
+注意，这里有一个细节就是FILE_MODE是在头文件里已经定义的了，其值为
+			#define FILE_MODE   (S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH)
+S_IRUSR表示的是USER具有READ的权限；同理S_IWUSR表示的是用户具有WRTIE的权限。S_IRGRP表示的是组用户具有读的权限
+S_IROTH表示的是OTHERS具有读的权限。
+然后第二个细节就是lseek(fd,16384,SEEK_SET) == -1
+表示的是将当前的偏移量赋值为16384。这个时候，中间的部分被称为空洞，里面保存的内容是\0。但是其不占磁盘内存。
+zailushang@zailushang-Inspiron-3670:~/UNIX高级环境编程/3$ cat file.hole 
+abcdefghijABCDEFGHIJzailushang@zailushang-Inspiron-3670:~/UNIX高级环境编程/3$ ls -l 
+total 60
+-rw-r--r-- 1 zailushang zailushang 16394 6月  28 09:23 file.hole
+-rwxrwxr-x 1 zailushang zailushang 14176 6月  28 09:23 test_for_create
+-rw-rw-r-- 1 zailushang zailushang   677 6月  28 09:22 test_for_create.cpp
+-rwxrwxr-x 1 zailushang zailushang  9384 6月  27 23:05 test_for_lseek
+-rw-rw-r-- 1 zailushang zailushang   200 6月  28 09:23 test_for_lseek.cpp
+-rwxrwxr-x 1 zailushang zailushang  9160 6月  27 22:25 test_for_lseek.out
+-rw-rw-r-- 1 zailushang zailushang  1911 6月  27 23:07 第三章知识点
+zailushang@zailushang-Inspiron-3670:~/UNIX高级环境编程/3$ od -c file.hole 
+0000000   a   b   c   d   e   f   g   h   i   j  \0  \0  \0  \0  \0  \0
+0000020  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0  \0
+*
+0040000   A   B   C   D   E   F   G   H   I   J
+0040012
